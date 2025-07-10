@@ -22,7 +22,7 @@ def connect_db():
 def home():
     return "✅ SmartHR API is running. Try /get-employee?employee_number=0155&table=Personnel"
 
-# Get employee by number and table
+# Get basic employee data from one table
 @app.route('/get-employee', methods=['GET'])
 def get_employee():
     emp_no = request.args.get('employee_number')
@@ -38,7 +38,6 @@ def get_employee():
         conn = connect_db()
         cursor = conn.cursor()
 
-        # ✅ Force SQL Server to treat the input as string to avoid conversion errors
         query = f"SELECT * FROM dbo.[{table}] WHERE EmployeeNum = CAST(%s AS NVARCHAR)"
         cursor.execute(query, (emp_no,))
         row = cursor.fetchone()
@@ -56,7 +55,78 @@ def get_employee():
     finally:
         conn.close()
 
-# Optional: Debug route to view sample employee records
+# Get full employee info with job profile and pay history
+@app.route('/get-full-employee-info', methods=['GET'])
+def get_full_employee_info():
+    emp_no = request.args.get('employee_number')
+
+    if not emp_no:
+        return jsonify({"error": "Missing employee_number parameter"}), 400
+
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+
+        # Query for employee and job info
+        query = """
+        SELECT
+            p.EmployeeNum,
+            p.PreferredName,
+            p.Surname,
+            p.Sex,
+            p.EthnicGroup,
+            p.Appointdate,
+            p.Appointype,
+            p.JobTitle,
+            p.DeptName,
+            p.Termination,
+            p.TerminationDate,
+            p.TerminationReason,
+            p1.Position,
+            pos.PositionTitle,
+            pos.Salary,
+            pjp.ProfileID,
+            jp.Description,
+            jp.ProfileName
+        FROM
+            Personnel1 p1
+        INNER JOIN PositionLU pos ON p1.Position = pos.Position
+        INNER JOIN PositionJobProfiles pjp ON pos.Position = pjp.Position
+        INNER JOIN JobProfile jp ON pjp.ProfileID = jp.ID
+        INNER JOIN Personnel p ON p1.CompanyNum = p.CompanyNum AND p1.EmployeeNum = p.EmployeeNum
+        WHERE
+            p.EmployeeNum = CAST(%s AS NVARCHAR)
+        """
+        cursor.execute(query, (emp_no,))
+        row = cursor.fetchone()
+
+        if not row:
+            return jsonify({"message": f"No employee found with EmployeeNum {emp_no}"}), 404
+
+        columns = [desc[0] for desc in cursor.description]
+        employee_info = dict(zip(columns, row))
+
+        # Query for pay history
+        cursor.execute("""
+            SELECT PayDate, Amount
+            FROM Pay
+            WHERE EmployeeNum = CAST(%s AS NVARCHAR)
+            ORDER BY PayDate DESC
+        """, (emp_no,))
+        pay_rows = cursor.fetchall()
+        pay_history = [{"PayDate": str(r[0]), "Amount": r[1]} for r in pay_rows]
+
+        employee_info["PayHistory"] = pay_history
+
+        return jsonify(employee_info)
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        conn.close()
+
+# Debug route to view 10 sample employee records
 @app.route('/debug', methods=['GET'])
 def debug():
     table = request.args.get('table', 'Personnel')
@@ -78,6 +148,6 @@ def debug():
     finally:
         conn.close()
 
-# Run the app locally (for Replit or manual testing)
+# Run locally
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
