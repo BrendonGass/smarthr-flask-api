@@ -1,3 +1,28 @@
+from flask import Flask, request, jsonify
+import pymssql
+
+app = Flask(__name__)
+
+# Connect to SQL Server
+def connect_db():
+    try:
+        conn = pymssql.connect(
+            server='129.232.198.224:51014',
+            database='SmartHR_Demo',
+            user='SmartHR_Admin',
+            password='5m@rtHR23!',
+            timeout=30
+        )
+        return conn
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        raise e
+
+@app.route('/')
+def home():
+    return "✅ SmartHR API is running. Try /get-employee?employee_number=0155&table=Personnel"
+
+# Get employee by number and table
 @app.route('/get-employee', methods=['GET'])
 def get_employee():
     emp_no = request.args.get('employee_number')
@@ -13,8 +38,8 @@ def get_employee():
         conn = connect_db()
         cursor = conn.cursor()
 
-        # DO NOT cast to int – EmployeeNum is a string
-        query = f"SELECT * FROM dbo.[{table}] WHERE EmployeeNum = %s"
+        # ✅ Force SQL Server to treat the input as string to avoid conversion errors
+        query = f"SELECT * FROM dbo.[{table}] WHERE EmployeeNum = CAST(%s AS NVARCHAR)"
         cursor.execute(query, (emp_no,))
         row = cursor.fetchone()
 
@@ -30,3 +55,29 @@ def get_employee():
 
     finally:
         conn.close()
+
+# Optional: Debug route to view sample employee records
+@app.route('/debug', methods=['GET'])
+def debug():
+    table = request.args.get('table', 'Personnel')
+
+    if table not in ['Personnel', 'Personnel1']:
+        return jsonify({"error": "Invalid table name"}), 400
+
+    try:
+        conn = connect_db()
+        cursor = conn.cursor()
+        query = f"SELECT TOP 10 * FROM dbo.[{table}]"
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        data = [dict(zip(columns, row)) for row in rows]
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+# Run the app locally (for Replit or manual testing)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
