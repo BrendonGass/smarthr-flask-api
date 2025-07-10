@@ -8,6 +8,7 @@ except ImportError:
 
 app = Flask(__name__)
 
+# Connect to SQL Server
 def connect_db():
     if PYMSSQL_AVAILABLE:
         try:
@@ -21,7 +22,7 @@ def connect_db():
             return conn
         except Exception as e:
             print(f"pymssql connection error: {e}")
-    
+
     try:
         conn = pyodbc.connect(
             'DRIVER={ODBC Driver 18 for SQL Server};'
@@ -34,7 +35,7 @@ def connect_db():
         )
         return conn
     except Exception as e:
-        print(f"Database connection error: {e}")
+        print(f"Database connection error (ODBC 18): {e}")
         try:
             conn = pyodbc.connect(
                 'DRIVER={ODBC Driver 17 for SQL Server};'
@@ -49,10 +50,12 @@ def connect_db():
             print(f"All connection methods failed. Last error: {e2}")
             raise e2
 
+# Home test route
 @app.route('/')
 def home():
-    return "✅ API is running. Use /get-employee, /get-employee-full, or /get-pay-history"
+    return "✅ SmartHR API is running. Try: /get-employee?employee_number=CP003&table=Personnel"
 
+# Endpoint to fetch employee by EmployeeNum
 @app.route('/get-employee', methods=['GET'])
 def get_employee():
     emp_no = request.args.get('employee_number')
@@ -67,99 +70,26 @@ def get_employee():
     try:
         conn = connect_db()
         cursor = conn.cursor()
+
+        # Use safe query and treat EmployeeNum as nvarchar
         query = f"SELECT * FROM dbo.[{table}] WHERE EmployeeNum = ?"
         cursor.execute(query, (emp_no,))
         row = cursor.fetchone()
 
         if row:
             columns = [column[0] for column in cursor.description]
-            return jsonify(dict(zip(columns, row)))
+            result = dict(zip(columns, row))
+            return jsonify(result)
         else:
             return jsonify({"message": f"No employee found with EmployeeNum {emp_no} in {table}"}), 404
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
     finally:
         if 'conn' in locals():
             conn.close()
 
-@app.route('/get-employee-full', methods=['GET'])
-def get_employee_full():
-    emp_no = request.args.get('employee_number')
-
-    if not emp_no:
-        return jsonify({"error": "Missing employee_number parameter"}), 400
-
-    try:
-        conn = connect_db()
-        cursor = conn.cursor()
-        query = """
-        SELECT 
-            Personnel.EmployeeNum,
-            Personnel.PreferredName,
-            Personnel.Surname,
-            Personnel.Sex,
-            Personnel.EthnicGroup,
-            Personnel.Appointdate,
-            Personnel.Appointype,
-            Personnel.JobTitle,
-            Personnel.DeptName,
-            Personnel.Termination,
-            Personnel.TerminationDate,
-            Personnel.TerminationReason,
-            Personnel1.Position,
-            PositionLU.PositionTitle,
-            PositionLU.Salary,
-            PositionJobProfiles.ProfileID,
-            JobProfile.Description,
-            JobProfile.ProfileName
-        FROM 
-            Personnel1
-            INNER JOIN PositionLU ON Personnel1.Position = PositionLU.Position
-            INNER JOIN PositionJobProfiles ON PositionLU.Position = PositionJobProfiles.Position
-            INNER JOIN JobProfile ON PositionJobProfiles.ProfileID = JobProfile.ID
-            INNER JOIN Personnel ON Personnel1.CompanyNum = Personnel.CompanyNum 
-                AND Personnel1.EmployeeNum = Personnel.EmployeeNum
-        WHERE 
-            Personnel.EmployeeNum = ?
-        """
-        cursor.execute(query, (emp_no,))
-        row = cursor.fetchone()
-
-        if row:
-            columns = [column[0] for column in cursor.description]
-            return jsonify(dict(zip(columns, row)))
-        else:
-            return jsonify({"message": f"No full profile found for EmployeeNum {emp_no}"}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
-@app.route('/get-pay-history', methods=['GET'])
-def get_pay_history():
-    emp_no = request.args.get('employee_number')
-
-    if not emp_no:
-        return jsonify({"error": "Missing employee_number parameter"}), 400
-
-    try:
-        conn = connect_db()
-        cursor = conn.cursor()
-        query = """
-        SELECT * FROM dbo.Pay
-        WHERE EmployeeNum = ?
-        ORDER BY PayDate DESC
-        """
-        cursor.execute(query, (emp_no,))
-        rows = cursor.fetchall()
-        columns = [column[0] for column in cursor.description]
-        return jsonify([dict(zip(columns, row)) for row in rows])
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    finally:
-        if 'conn' in locals():
-            conn.close()
-
+# Run the app
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
