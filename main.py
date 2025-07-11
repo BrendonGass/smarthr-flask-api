@@ -4,7 +4,6 @@ import pymssql
 
 app = Flask(__name__)
 
-# Database connection details
 DB_CONFIG = {
     "server": "129.232.198.224:51014",
     "user": "SmartHR_Admin",
@@ -18,7 +17,7 @@ def connect_db():
 
 @app.route('/')
 def home():
-    return "✅ API is live. Try /get-employee?employee_number=CP003&table=Personnel"
+    return "✅ API is running. Use /get-employee or /get-employee-full"
 
 @app.route('/get-employee', methods=['GET'])
 def get_employee():
@@ -62,7 +61,7 @@ def get_employee_full():
             p.Termination, p.TerminationDate, p.TerminationReason,
             p1.Position, pl.PositionTitle, pl.Salary,
             pjp.ProfileID, jp.Description, jp.ProfileName,
-            pay.Amount, pay.PayDate
+            pay.PayDate  -- Removed invalid 'Amount' column
         FROM Personnel1 p1
         INNER JOIN PositionLU pl ON p1.Position = pl.Position
         INNER JOIN PositionJobProfiles pjp ON pl.Position = pjp.Position
