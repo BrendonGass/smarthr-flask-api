@@ -1,57 +1,24 @@
 
 from flask import Flask, request, jsonify
-import pyodbc
-try:
-    import pymssql
-    PYMSSQL_AVAILABLE = True
-except ImportError:
-    PYMSSQL_AVAILABLE = False
+import pymssql
 
 app = Flask(__name__)
 
+# Database connection details
+DB_CONFIG = {
+    "server": "129.232.198.224:51014",
+    "user": "SmartHR_Admin",
+    "password": "5m@rtHR23!",
+    "database": "SmartHR_Demo",
+    "timeout": 30
+}
+
 def connect_db():
-    if PYMSSQL_AVAILABLE:
-        try:
-            conn = pymssql.connect(
-                server='129.232.198.224:51014',
-                database='SmartHR_Demo',
-                user='SmartHR_Admin',
-                password='5m@rtHR23!',
-                timeout=30
-            )
-            return conn
-        except Exception as e:
-            print(f"pymssql connection error: {e}")
-    try:
-        conn = pyodbc.connect(
-            'DRIVER={ODBC Driver 18 for SQL Server};'
-            'SERVER=129.232.198.224,51014;'
-            'DATABASE=SmartHR_Demo;'
-            'UID=SmartHR_Admin;'
-            'PWD=5m@rtHR23!;'
-            'TrustServerCertificate=yes;'
-            'Encrypt=no;'
-        )
-        return conn
-    except Exception as e:
-        print(f"ODBC Driver 18 error: {e}")
-        try:
-            conn = pyodbc.connect(
-                'DRIVER={ODBC Driver 17 for SQL Server};'
-                'SERVER=129.232.198.224,51014;'
-                'DATABASE=SmartHR_Demo;'
-                'UID=SmartHR_Admin;'
-                'PWD=5m@rtHR23!;'
-                'TrustServerCertificate=yes;'
-            )
-            return conn
-        except Exception as e2:
-            print(f"Fallback to Driver 17 failed: {e2}")
-            raise e2
+    return pymssql.connect(**DB_CONFIG)
 
 @app.route('/')
 def home():
-    return "✅ API is running. Try /get-employee or /get-employee-full"
+    return "✅ API is live. Try /get-employee?employee_number=CP003&table=Personnel"
 
 @app.route('/get-employee', methods=['GET'])
 def get_employee():
@@ -60,21 +27,17 @@ def get_employee():
 
     if not emp_no:
         return jsonify({"error": "Missing employee_number parameter"}), 400
+
     if table not in ['Personnel', 'Personnel1']:
         return jsonify({"error": f"Invalid table name: {table}"}), 400
 
     try:
         conn = connect_db()
-        cursor = conn.cursor()
-        query = f"SELECT * FROM dbo.[{table}] WHERE EmployeeNum = ?"
+        cursor = conn.cursor(as_dict=True)
+        query = f"SELECT * FROM dbo.[{table}] WHERE EmployeeNum = %s"
         cursor.execute(query, (emp_no,))
         row = cursor.fetchone()
-
-        if row:
-            columns = [column[0] for column in cursor.description]
-            return jsonify(dict(zip(columns, row)))
-        else:
-            return jsonify({"message": f"No employee found with EmployeeNum {emp_no} in {table}"}), 404
+        return jsonify(row if row else {"message": f"No employee found with EmployeeNum {emp_no} in {table}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -90,34 +53,27 @@ def get_employee_full():
 
     try:
         conn = connect_db()
-        cursor = conn.cursor()
-        query = """
-            SELECT
-                p.EmployeeNum, p.PreferredName, p.Surname, p.Sex, p.EthnicGroup,
-                p.Appointdate, p.Appointype, p.JobTitle, p.DeptName,
-                p.Termination, p.TerminationDate, p.TerminationReason,
-                p1.Position,
-                pl.PositionTitle, pl.Salary,
-                pjp.ProfileID,
-                jp.Description AS ProfileDescription,
-                jp.ProfileName,
-                pay.Year, pay.Period, pay.GrossIncome, pay.NetPay
-            FROM dbo.Personnel p
-            LEFT JOIN dbo.Personnel1 p1 ON p.EmployeeNum = p1.EmployeeNum AND p.CompanyNum = p1.CompanyNum
-            LEFT JOIN dbo.PositionLU pl ON p1.Position = pl.Position
-            LEFT JOIN dbo.PositionJobProfiles pjp ON pl.Position = pjp.Position
-            LEFT JOIN dbo.JobProfile jp ON pjp.ProfileID = jp.ID
-            LEFT JOIN dbo.Pay pay ON p.EmployeeNum = pay.EmployeeNum
-            WHERE p.EmployeeNum = ?
-        """
+        cursor = conn.cursor(as_dict=True)
+
+        query = '''
+        SELECT
+            p.EmployeeNum, p.PreferredName, p.Surname, p.Sex, p.EthnicGroup,
+            p.Appointdate, p.Appointype, p.JobTitle, p.DeptName,
+            p.Termination, p.TerminationDate, p.TerminationReason,
+            p1.Position, pl.PositionTitle, pl.Salary,
+            pjp.ProfileID, jp.Description, jp.ProfileName,
+            pay.Amount, pay.PayDate
+        FROM Personnel1 p1
+        INNER JOIN PositionLU pl ON p1.Position = pl.Position
+        INNER JOIN PositionJobProfiles pjp ON pl.Position = pjp.Position
+        INNER JOIN JobProfile jp ON pjp.ProfileID = jp.ID
+        INNER JOIN Personnel p ON p1.CompanyNum = p.CompanyNum AND p1.EmployeeNum = p.EmployeeNum
+        LEFT JOIN Pay pay ON p.EmployeeNum = pay.EmployeeNum
+        WHERE p.EmployeeNum = %s
+        '''
         cursor.execute(query, (emp_no,))
         rows = cursor.fetchall()
-
-        if rows:
-            columns = [col[0] for col in cursor.description]
-            return jsonify([dict(zip(columns, row)) for row in rows])
-        else:
-            return jsonify({"message": f"No employee found with EmployeeNum {emp_no}"}), 404
+        return jsonify(rows if rows else {"message": f"No full profile found for EmployeeNum {emp_no}"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
